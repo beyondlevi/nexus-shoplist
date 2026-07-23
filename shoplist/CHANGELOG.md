@@ -1,5 +1,11 @@
 # Changelog — Shopping List
 
+## 1.1.2
+
+- Declare the built-in `ICON` key `cart` so the cart glyph also renders on the
+  glasses HUD, keeping `ICON_DRAWABLE` as a fallback for hubs that don't
+  recognize the built-in yet.
+
 ## 1.1.1
 
 - Settings header now reads the real `versionName` from the package manager

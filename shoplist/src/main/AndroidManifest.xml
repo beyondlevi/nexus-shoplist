@@ -42,6 +42,12 @@
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.DISPLAY_NAME"
                 android:value="Shopping List" />
+            <!-- Glasses HUD glyph: prefer the built-in "cart" key; keep the custom
+                 drawable as a fallback for hubs that don't recognize it yet. If the
+                 built-in is recognized it wins, else Nexus uses ICON_DRAWABLE. -->
+            <meta-data
+                android:name="com.anezium.rokidbus.plugin.ICON"
+                android:value="cart" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.ICON_DRAWABLE"
                 android:resource="@drawable/nexus_glyph_cart" />
