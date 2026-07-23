@@ -84,7 +84,7 @@ class ShopListActivity : Activity() {
                     this@ShopListActivity,
                     R.drawable.nexus_glyph_cart,
                     "Shopping List",
-                    "Headless Nexus plugin . v1.0",
+                    "Headless Nexus plugin . v${versionName()}",
                 ),
                 NexusUi.block(),
             )
@@ -180,4 +180,9 @@ class ShopListActivity : Activity() {
     private fun uninstallRow() = NexusUi.uninstallCard(this, "Shopping List") {
         startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")))
     }
+
+    /** Read the real versionName from the installed package so the header never drifts from the manifest. */
+    private fun versionName(): String =
+        runCatching { packageManager.getPackageInfo(packageName, 0).versionName }
+            .getOrNull() ?: ""
 }
