@@ -3,44 +3,42 @@ package com.volund.nexus.plugin.shoplist
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Proves the whole surface is operable on the R08 ring's single axis:
- * move (NEXT/PREV) wraps, select (toggle) affects only the focused row, and the
- * surface never violates the card contract (line count / stable contentKey).
+ * Proves the whole surface is operable on the R08 ring's single axis: row 0 is
+ * the "Add by voice" action, rows 1..n are items; move wraps over the combined
+ * list, select starts voice or toggles the focused item, and the card never
+ * exceeds its row/line limits.
  */
 class ShopListStateTest {
     private fun sample(vararg labels: String) =
         labels.mapIndexed { i, l -> ShopItem(id = "id$i", label = l) }
 
     @Test
-    fun `move wraps once in either direction`() {
-        val state = ShopListState(sample("Milk", "Eggs", "Bread"))
+    fun `move wraps over the voice row plus items`() {
+        val state = ShopListState(sample("Milk", "Eggs")) // rows: voice, Milk, Eggs
+        assertEquals(0, state.focus)
         state.move(-1)
-        assertEquals(2, state.selectedIndex)
+        assertEquals(2, state.focus) // wrapped to last item
         state.move(1)
-        assertEquals(0, state.selectedIndex)
+        assertEquals(0, state.focus) // back to voice row
     }
 
     @Test
-    fun `move and toggle are no-ops on an empty list`() {
-        val state = ShopListState()
-        state.move(1)
-        assertEquals(0, state.selectedIndex)
-        assertNull(state.toggle())
-        assertEquals(listOf("  (empty - add items on your phone)"), state.lines())
+    fun `select on row 0 starts voice`() {
+        val state = ShopListState(sample("Milk"))
+        assertEquals(ShopListState.SelectResult.StartVoice, state.select())
     }
 
     @Test
-    fun `toggle checks only the focused row`() {
-        val state = ShopListState(sample("Milk", "Eggs", "Bread"))
-        state.move(1)
-        val toggled = state.toggle()
-        assertEquals("Eggs", toggled?.label)
-        assertTrue(toggled?.done == true)
+    fun `select on an item toggles only that item`() {
+        val state = ShopListState(sample("Milk", "Eggs"))
+        state.move(2) // focus Eggs (row 2 -> item index 1)
+        val result = state.select()
+        assertTrue(result is ShopListState.SelectResult.Toggled)
+        assertTrue((result as ShopListState.SelectResult.Toggled).item.done)
         assertEquals(1, state.items().count { it.done })
         assertTrue(state.items()[1].done)
         assertFalse(state.items()[0].done)
@@ -49,40 +47,59 @@ class ShopListStateTest {
     @Test
     fun `toggle is idempotent in pairs`() {
         val state = ShopListState(sample("Milk"))
-        assertTrue(state.toggle()?.done == true)
-        assertFalse(state.toggle()?.done == true)
-    }
-
-    @Test
-    fun `setItems clamps selection into range`() {
-        val state = ShopListState(sample("a", "b", "c", "d"))
-        state.move(3) // index 3
-        state.setItems(sample("a", "b"))
-        assertEquals(1, state.selectedIndex)
-    }
-
-    @Test
-    fun `only the focused row is marked with a cursor`() {
-        val state = ShopListState(sample("Milk", "Eggs"))
         state.move(1)
+        assertTrue((state.select() as ShopListState.SelectResult.Toggled).item.done)
+        assertFalse((state.select() as ShopListState.SelectResult.Toggled).item.done)
+    }
+
+    @Test
+    fun `empty list still exposes the voice row and select starts voice`() {
+        val state = ShopListState()
+        assertEquals(1, state.rowCount)
+        state.move(1)
+        assertEquals(0, state.focus) // wraps: only the voice row exists
+        assertEquals(ShopListState.SelectResult.StartVoice, state.select())
+        assertTrue(state.lines()[0].startsWith(">"))
+    }
+
+    @Test
+    fun `setItems clamps focus into range`() {
+        val state = ShopListState(sample("a", "b", "c", "d"))
+        state.move(4) // focus row 4 (item d)
+        state.setItems(sample("a", "b"))
+        assertEquals(2, state.focus) // rows now: voice, a, b -> clamp to 2
+    }
+
+    @Test
+    fun `focusItem moves the cursor onto the given item`() {
+        val state = ShopListState(sample("Milk", "Eggs", "Bread"))
+        state.focusItem("id2")
+        assertEquals(3, state.focus)
+        assertEquals("Bread", state.selectedItem()?.label)
+    }
+
+    @Test
+    fun `voice row is always rendered first with a cursor when focused`() {
+        val state = ShopListState(sample("Milk"))
+        assertTrue(state.lines()[0].contains("Add item by voice"))
+        assertTrue(state.lines()[0].startsWith(">"))
         assertEquals(1, state.lines().count { it.startsWith(">") })
-        assertTrue(state.lines()[1].startsWith("> "))
     }
 
     @Test
     fun `contentKey changes on move and on toggle and stays within limit`() {
-        val state = ShopListState(sample("Milk", "Eggs", "Bread"))
+        val state = ShopListState(sample("Milk", "Eggs"))
         val initial = state.contentKey()
         assertTrue(initial.length <= 128)
         state.move(1)
+        assertNotEquals(initial, state.contentKey())
         val afterMove = state.contentKey()
-        assertNotEquals(initial, afterMove)
-        state.toggle()
+        state.select()
         assertNotEquals(afterMove, state.contentKey())
     }
 
     @Test
-    fun `large list never exceeds the card row ceiling`() {
+    fun `large list plus voice row never exceeds the card row ceiling`() {
         val many = (0 until 200).map { ShopItem(id = "id$it", label = "item $it") }
         val state = ShopListState(many)
         state.move(150)

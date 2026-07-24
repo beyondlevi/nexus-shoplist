@@ -1,9 +1,14 @@
 package com.volund.nexus.plugin.shoplist
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -15,18 +20,40 @@ import com.anezium.rokidbus.client.ui.NexusUi
 
 /**
  * Phone-side manager for the shopping list. Headless plugins never draw on the
- * glasses, so all editing (add / remove / clear checked) lives here, built only
- * from the NexusUi/BusTheme kit. The list itself is rendered on the HUD by
- * [ShopListPluginService]. Ends with the mandatory uninstall card.
+ * glasses, so all editing (add / remove / clear checked / voice setup) lives
+ * here, built only from the NexusUi/BusTheme kit. The list itself is rendered on
+ * the HUD by [ShopListPluginService]. Ends with the mandatory uninstall card.
  */
 class ShopListActivity : Activity() {
     private val store by lazy { ShopListStore(this) }
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = NexusUi.BG
         window.navigationBarColor = NexusUi.BG
         rebuild()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Reflect items added elsewhere and the current mic-permission state.
+        rebuild()
+    }
+
+    /** Defer rebuilds triggered from a click so we never setContentView inside the dispatching view (§6). */
+    private fun deferRebuild() = handler.post { rebuild() }
+
+    private fun micGranted(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_MIC) deferRebuild()
     }
 
     private fun rebuild() {
@@ -73,6 +100,11 @@ class ShopListActivity : Activity() {
             }
 
             addView(BusTheme.gap(this@ShopListActivity, 24))
+            addView(NexusUi.sectionRow(this@ShopListActivity, "Voice"), NexusUi.block())
+            addView(BusTheme.gap(this@ShopListActivity, 10))
+            addView(voiceSection(), NexusUi.block())
+
+            addView(BusTheme.gap(this@ShopListActivity, 24))
             addView(NexusUi.sectionRow(this@ShopListActivity, "Plugin"), NexusUi.block())
             addView(BusTheme.gap(this@ShopListActivity, 10))
             addView(uninstallRow(), NexusUi.block())
@@ -100,7 +132,7 @@ class ShopListActivity : Activity() {
         val input = NexusUi.field(this, "e.g. Milk")
         val button = NexusUi.pillButton(this, "Add").apply {
             setOnClickListener {
-                if (store.add(input.text.toString())) rebuild()
+                if (store.add(input.text.toString())) deferRebuild()
             }
         }
         return LinearLayout(this).apply {
@@ -138,7 +170,7 @@ class ShopListActivity : Activity() {
                         if (added == 1) "Added 1 item" else "Added $added items",
                         Toast.LENGTH_SHORT,
                     ).show()
-                    rebuild()
+                    deferRebuild()
                 } else {
                     Toast.makeText(this@ShopListActivity, "Nothing to add", Toast.LENGTH_SHORT).show()
                 }
@@ -166,14 +198,14 @@ class ShopListActivity : Activity() {
             if (item.done) "checked . tap to remove" else "tap to remove",
         ) {
             store.remove(item.id)
-            rebuild()
+            deferRebuild()
         }
     }
 
     private fun clearCheckedButton() = NexusUi.outlinePillButton(this, "Clear checked").apply {
         setOnClickListener {
             store.clearChecked()
-            rebuild()
+            deferRebuild()
         }
     }
 
@@ -181,8 +213,75 @@ class ShopListActivity : Activity() {
         startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")))
     }
 
+    /**
+     * Voice setup: the glasses mic reaches STT through the Nexus `microphone`
+     * capability (approved in Rokid Nexus → Plugin access) plus the Android
+     * RECORD_AUDIO runtime permission the SpeechRecognizer requires. Optional
+     * recognition language lives here too.
+     */
+    private fun voiceSection(): LinearLayout {
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        if (!supported) {
+            column.addView(NexusUi.cardBody(this, "Voice dictation needs Android 13 or newer."), NexusUi.block())
+            return column
+        }
+        column.addView(
+            NexusUi.cardBody(
+                this,
+                "Add items by voice from the glasses: focus \"Add item by voice\" and tap the ring. " +
+                    "Approve the microphone for this plugin in Rokid Nexus → Plugin access, and allow it here.",
+            ),
+            NexusUi.block(),
+        )
+        column.addView(BusTheme.gap(this, 10))
+        if (micGranted()) {
+            column.addView(NexusUi.cardBody(this, "Microphone: allowed on this phone."), NexusUi.block())
+            column.addView(BusTheme.gap(this, 10))
+            column.addView(languageRow(), NexusUi.block())
+        } else {
+            column.addView(
+                NexusUi.pillButton(this, "Allow microphone").apply {
+                    setOnClickListener {
+                        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_MIC)
+                    }
+                },
+                NexusUi.block(),
+            )
+        }
+        return column
+    }
+
+    private fun languageRow(): LinearLayout {
+        val input = NexusUi.field(this, "Language e.g. pt-BR (blank = device default)").apply {
+            setText(store.voiceLanguage().orEmpty())
+        }
+        val button = NexusUi.pillButton(this, "Save").apply {
+            setOnClickListener {
+                store.setVoiceLanguage(input.text.toString())
+                Toast.makeText(this@ShopListActivity, "Voice language saved", Toast.LENGTH_SHORT).show()
+            }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                button,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginStart = NexusUi.dp(this@ShopListActivity, 10) },
+            )
+        }
+    }
+
     /** Read the real versionName from the installed package so the header never drifts from the manifest. */
     private fun versionName(): String =
         runCatching { packageManager.getPackageInfo(packageName, 0).versionName }
             .getOrNull() ?: ""
+
+    private companion object {
+        const val REQ_MIC = 4201
+    }
 }

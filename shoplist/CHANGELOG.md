@@ -1,5 +1,18 @@
 # Changelog — Shopping List
 
+## 1.2.0
+
+- Add items by voice from the glasses: the card now has an "Add item by voice"
+  row; tapping it captures the glasses microphone (Nexus `microphone`
+  capability) and pipes the audio into on-device speech-to-text, appending the
+  spoken item. Tap to stop, back to cancel.
+- STT is Android's on-device `SpeechRecognizer` fed via an injected-audio pipe
+  (no cloud, no bundled model) — transposed from Rokid-Relay's Android engine.
+- New plugin settings: allow the microphone (RECORD_AUDIO) and set an optional
+  recognition language (BCP-47, blank = device default).
+- Adds the `microphone` capability, so the plugin returns to Pending until you
+  re-approve it in Rokid Nexus → Plugin access.
+
 ## 1.1.2
 
 - Declare the built-in `ICON` key `cart` so the cart glyph also renders on the

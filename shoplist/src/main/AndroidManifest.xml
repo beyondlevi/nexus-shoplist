@@ -4,6 +4,10 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Injected-audio STT: the framework gates SpeechRecognizer on RECORD_AUDIO
+         even though the glasses PCM arrives over the Nexus hub (no device mic is
+         opened). Granted at runtime from the plugin settings screen. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Deliberately no POST_NOTIFICATIONS: plugin foreground services must stay
          invisible; the Rokid Nexus hub notification is the single user-facing one. -->
 
@@ -56,7 +60,7 @@
                 android:value="3" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
-                android:value="surfaces" />
+                android:value="surfaces,microphone" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
                 android:value="/plugin/shoplist,/system/plugin" />

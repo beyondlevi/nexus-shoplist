@@ -13,8 +13,20 @@ never draw their own UI on the glasses.
   checked state, plus a footer with the remaining count.
 - **R08 one-axis input** — NEXT/PREV move the cursor (wrap), SELECT checks the
   focused item off, BACK closes. Nothing needs a second axis, pointer or gesture.
+- **Add by voice from the glasses** — the first card row is "Add item by voice";
+  tap it to capture the glasses mic (Nexus `microphone` capability) and dictate a
+  new item. Speech-to-text is Android's on-device `SpeechRecognizer` fed through
+  an injected-audio pipe (no cloud, no bundled model). Tap to stop, back to cancel.
 - **Bulk paste import** — paste a multi-line list on the phone and "Add all"
   turns each non-blank line into an item.
+
+## Capabilities
+
+`surfaces` (HUD) and `microphone` (glasses mic for voice dictation). The
+microphone is approved per-plugin in Rokid Nexus → Plugin access; the phone also
+asks for the Android RECORD_AUDIO runtime permission (required by
+SpeechRecognizer even though the audio arrives over the hub). Voice needs
+Android 13+.
 
 ## R08 input mapping
 
@@ -22,8 +34,8 @@ never draw their own UI on the glasses.
 |------|----------|--------|
 | NEXT | `DPAD_RIGHT` / `DPAD_DOWN` | move cursor down (wraps) |
 | PREV | `DPAD_LEFT` / `DPAD_UP` | move cursor up (wraps) |
-| SELECT | `DPAD_CENTER` / `ENTER` | check / uncheck the focused item |
-| BACK | `KEYCODE_BACK` | hide the surface (self-close) |
+| SELECT | `DPAD_CENTER` / `ENTER` | voice dictate (row 0) / check the focused item |
+| BACK | `KEYCODE_BACK` | cancel voice, else hide the surface (self-close) |
 
 ## Build
 

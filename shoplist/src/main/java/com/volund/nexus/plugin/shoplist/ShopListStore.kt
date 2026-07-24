@@ -83,9 +83,19 @@ class ShopListStore(context: Context) {
         save(load().filterNot { it.done })
     }
 
+    /** Voice recognition language tag (BCP-47, e.g. "pt-BR"); null = device default. */
+    fun voiceLanguage(): String? = prefs.getString(KEY_VOICE_LANG, null)?.takeIf { it.isNotBlank() }
+
+    fun setVoiceLanguage(tag: String?) {
+        prefs.edit().apply {
+            if (tag.isNullOrBlank()) remove(KEY_VOICE_LANG) else putString(KEY_VOICE_LANG, tag.trim())
+        }.apply()
+    }
+
     private companion object {
         const val PREFS = "shoplist"
         const val KEY_ITEMS = "items"
+        const val KEY_VOICE_LANG = "voice_language"
         // Below the 64-row card ceiling; the state machine windows anything larger.
         const val MAX_ITEMS = 60
         // Leaves ample room under the 240-char surface line limit after the cursor/box prefix.
