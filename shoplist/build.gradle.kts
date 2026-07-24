@@ -10,10 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "com.volund.nexus.plugin.shoplist"
-        minSdk = 31
+        minSdk = 30
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.2.2"
+        versionCode = 10
+        versionName = "1.2.5"
     }
 
     compileOptions {

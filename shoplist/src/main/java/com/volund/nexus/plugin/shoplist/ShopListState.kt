@@ -53,55 +53,52 @@ internal class ShopListState(initial: List<ShopItem> = emptyList()) {
         return SelectResult.Toggled(updated)
     }
 
-    /** Rows rendered for the HUD card: the voice action first, then a window of items. */
+    /**
+     * Rows rendered for the HUD card. A `NexusCard` has no scroll/selection concept
+     * and the hub renders only the top ~6 rows without scrolling to the cursor
+     * (field-gotchas §9). So we PAGINATE the focusable rows (voice action + items)
+     * into viewport-sized pages that always contain the focused row.
+     */
     fun lines(): List<String> {
-        val out = ArrayList<String>()
-        out += "${if (focus == 0) ">" else " "} + Add item by voice"
         if (items.isEmpty()) {
-            out += "  (empty - speak an item or add on phone)"
-            return out
+            return listOf(
+                "${if (focus == 0) ">" else " "} + Add item by voice",
+                "  (empty - speak an item or add on phone)",
+            )
         }
-        for (index in visibleItemRange()) {
-            val item = items[index]
+        val rows = allRows()
+        val page = focus / ROWS_PER_PAGE
+        val start = page * ROWS_PER_PAGE
+        val end = minOf(start + ROWS_PER_PAGE, rows.size)
+        return rows.subList(start, end)
+    }
+
+    /** The full 1:1 list of focusable rows (row 0 = voice action, 1..n = items), each marked. */
+    private fun allRows(): List<String> {
+        val rows = ArrayList<String>(items.size + 1)
+        rows += "${if (focus == 0) ">" else " "} + Add item by voice"
+        items.forEachIndexed { index, item ->
             val cursor = if (focus - 1 == index) ">" else " "
             val box = if (item.done) "[x]" else "[ ]"
-            out += "$cursor $box ${item.label}"
+            rows += "$cursor $box ${item.label}"
         }
-        return out
+        return rows
     }
 
     fun footer(): String {
         if (focus == 0) return "tap to speak a new item . back"
         val remaining = items.count { !it.done }
-        return "move . tap to check . back  .  $remaining left"
+        // Position hint so the user knows the list continues past the visible page.
+        val pos = "$focus/${items.size}"
+        return "move . tap . back  .  $remaining left . $pos"
     }
 
-    /** Stable key over the rendered content so the hub only repaints on a real change (<= 128). */
+    /** Stable key over the rendered page so the hub only repaints on a real change (<= 128). */
     fun contentKey(): String {
         var hash = 1
         hash = 31 * hash + focus
-        for (index in visibleItemRange()) {
-            val item = items[index]
-            hash = 31 * hash + item.id.hashCode()
-            hash = 31 * hash + item.label.hashCode()
-            hash = 31 * hash + (if (item.done) 1 else 0)
-        }
+        for (line in lines()) hash = 31 * hash + line.hashCode()
         return "shop-" + Integer.toHexString(hash)
-    }
-
-    /** Window of item indices shown on the card, guaranteeing <= [MAX_VISIBLE] item rows. */
-    private fun visibleItemRange(): IntRange {
-        if (items.isEmpty()) return IntRange.EMPTY
-        if (items.size <= MAX_VISIBLE) return items.indices
-        val itemFocus = (focus - 1).coerceAtLeast(0)
-        val half = MAX_VISIBLE / 2
-        var start = (itemFocus - half).coerceAtLeast(0)
-        var end = start + MAX_VISIBLE - 1
-        if (end > items.lastIndex) {
-            end = items.lastIndex
-            start = end - MAX_VISIBLE + 1
-        }
-        return start..end
     }
 
     sealed interface SelectResult {
@@ -114,7 +111,11 @@ internal class ShopListState(initial: List<ShopItem> = emptyList()) {
     }
 
     private companion object {
-        // Voice row (1) + items window (<= 59) stays under the 64-row NexusCard cap.
-        const val MAX_VISIBLE = 59
+        // Rows shown per HUD page. The glasses card body renders up to
+        // CARD_BODY_MAX_LINES = 15 text lines (verified in glasses-hub
+        // SurfaceHudView) and never scrolls to the cursor, so a page must hold the
+        // focus and fit that budget. 12 leaves slack for the odd row that wraps to
+        // two lines while filling the screen far better than a tiny page.
+        const val ROWS_PER_PAGE = 12
     }
 }

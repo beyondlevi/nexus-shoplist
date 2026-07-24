@@ -1,5 +1,18 @@
 # Changelog — Shopping List
 
+## 1.2.5
+
+- Show more items per screen: the HUD card body renders up to 15 lines, so the
+  per-page size was raised from 6 to 12 rows — the list now fills the glasses
+  screen instead of leaving most of it empty.
+
+## 1.2.4
+
+- Fix long lists: items past the first screen were unreachable — the HUD card
+  doesn't scroll to the cursor, so the focused row scrolled off-screen. The list
+  now paginates into viewport-sized pages that always contain the focused row,
+  with a position hint in the footer.
+
 ## 1.2.3
 
 - Lower `minSdk` from 31 to 30 (Android 11) to match the Nexus platform's

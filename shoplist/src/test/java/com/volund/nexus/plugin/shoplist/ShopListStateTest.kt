@@ -99,10 +99,28 @@ class ShopListStateTest {
     }
 
     @Test
-    fun `large list plus voice row never exceeds the card row ceiling`() {
+    fun `deep focus in a large list stays visible on a small page`() {
         val many = (0 until 200).map { ShopItem(id = "id$it", label = "item $it") }
         val state = ShopListState(many)
-        state.move(150)
-        assertTrue(state.lines().size <= 64)
+        state.move(150) // focus row 150 (item 149)
+        val lines = state.lines()
+        assertTrue("page must fit the card body budget", lines.size <= 15)
+        // The focused row (the one carrying the cursor) must be in the rendered page.
+        assertEquals(1, lines.count { it.startsWith(">") })
+        assertTrue("focused item must be visible", lines.any { it.startsWith("> ") && it.contains("item 149") })
+    }
+
+    @Test
+    fun `every focus position keeps the focused row on the page`() {
+        val many = (0 until 130).map { ShopItem(id = "id$it", label = "item $it") }
+        val state = ShopListState(many)
+        for (step in 0 until many.size) {
+            assertEquals(
+                "focus $step must render its cursor row",
+                1,
+                state.lines().count { it.startsWith(">") },
+            )
+            state.move(1)
+        }
     }
 }
