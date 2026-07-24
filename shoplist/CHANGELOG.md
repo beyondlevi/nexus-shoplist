@@ -1,5 +1,12 @@
 # Changelog — Shopping List
 
+## 1.2.3
+
+- Lower `minSdk` from 31 to 30 (Android 11) to match the Nexus platform's
+  supported floor — a minSdk-31 APK can't be parsed/installed on Android 11
+  phones, which surfaced as a misleading "downloaded APK does not match the
+  registry" error in the Store. No functional change.
+
 ## 1.2.2
 
 - Voice dictation now shows a confirm step: after transcription the recognized
