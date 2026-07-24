@@ -1,5 +1,22 @@
 # Changelog — Shopping List
 
+## 1.2.2
+
+- Voice dictation now shows a confirm step: after transcription the recognized
+  item is shown as "Add this item?" — tap to add, back to discard — instead of
+  adding it straight to the list.
+
+## 1.2.1
+
+- Fix voice input that never received audio on device: the manifest now includes
+  the `/audio` receive prefix so the hub actually delivers the glasses mic frames.
+- Rework speech-to-text to the buffered OpenAI path (proven in rokid-inbox-nexus):
+  buffer the 16 kHz PCM from `nexusAudioSession`, encode WAV, POST to OpenAI
+  `/v1/audio/transcriptions`. Removes the unreliable injected-audio
+  `SpeechRecognizer` approach and the `RECORD_AUDIO` permission (adds `INTERNET`).
+- Plugin settings now hold the OpenAI API key (stored encrypted), a voice
+  on/off toggle, language, and model. Builds against `bus-client:sdk-v0.2.1`.
+
 ## 1.2.0
 
 - Add items by voice from the glasses: the card now has an "Add item by voice"

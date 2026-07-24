@@ -14,9 +14,10 @@ never draw their own UI on the glasses.
 - **R08 one-axis input** — NEXT/PREV move the cursor (wrap), SELECT checks the
   focused item off, BACK closes. Nothing needs a second axis, pointer or gesture.
 - **Add by voice from the glasses** — the first card row is "Add item by voice";
-  tap it to capture the glasses mic (Nexus `microphone` capability) and dictate a
-  new item. Speech-to-text is Android's on-device `SpeechRecognizer` fed through
-  an injected-audio pipe (no cloud, no bundled model). Tap to stop, back to cancel.
+  tap it to capture the glasses mic (Nexus `microphone` capability + `/audio`
+  receive prefix) and dictate a new item. The buffered PCM is transcribed by
+  OpenAI (`/v1/audio/transcriptions`) — set your API key in plugin settings.
+  Tap to add, back to cancel. No Android mic permission (audio arrives over the hub).
 - **Bulk paste import** — paste a multi-line list on the phone and "Add all"
   turns each non-blank line into an item.
 
