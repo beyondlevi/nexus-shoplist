@@ -12,8 +12,8 @@ android {
         applicationId = "com.volund.nexus.plugin.shoplist"
         minSdk = 30
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.2.5"
+        versionCode = 11
+        versionName = "1.3.0"
     }
 
     compileOptions {
@@ -22,13 +22,10 @@ android {
     }
 }
 
-val sdkVersion = providers.gradleProperty("sdkVersion").orElse("sdk-v0.2.1")
+val sdkVersion = providers.gradleProperty("sdkVersion").orElse("sdk-v0.3.0")
 
 dependencies {
     // Published Rokid Nexus bus-client SDK (JitPack). Standalone build — no monorepo checkout needed.
     implementation("com.github.Anezium.Rokid-Nexus:bus-client:${sdkVersion.get()}")
-    // Phone-side OpenAI transcription call + encrypted storage for the API key.
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("androidx.security:security-crypto:1.0.0")
     testImplementation("junit:junit:4.13.2")
 }

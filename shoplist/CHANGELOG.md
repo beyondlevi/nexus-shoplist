@@ -1,5 +1,16 @@
 # Changelog — Shopping List
 
+## 1.3.0
+
+- Voice dictation now uses the Nexus hub's built-in speech-to-text (`stt`
+  capability) instead of capturing the microphone and calling OpenAI: the plugin
+  asks the hub to listen and gets text back — no microphone permission, no API
+  key, no network, nothing to configure.
+- Drops the `microphone` capability (and the OpenAI key/model/language settings);
+  requests only `stt`. **You must re-approve the plugin in Plugin access** —
+  changing the capability set resets the grant to Pending.
+- Requires SDK `sdk-v0.3.0` and hub 1.0.42+.
+
 ## 1.2.5
 
 - Show more items per screen: the HUD card body renders up to 15 lines, so the

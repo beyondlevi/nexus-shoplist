@@ -14,20 +14,19 @@ never draw their own UI on the glasses.
 - **R08 one-axis input** — NEXT/PREV move the cursor (wrap), SELECT checks the
   focused item off, BACK closes. Nothing needs a second axis, pointer or gesture.
 - **Add by voice from the glasses** — the first card row is "Add item by voice";
-  tap it to capture the glasses mic (Nexus `microphone` capability + `/audio`
-  receive prefix) and dictate a new item. The buffered PCM is transcribed by
-  OpenAI (`/v1/audio/transcriptions`) — set your API key in plugin settings.
-  Tap to add, back to cancel. No Android mic permission (audio arrives over the hub).
+  tap it and speak. Transcription uses the Nexus hub's built-in speech-to-text
+  (`stt` capability) — the plugin gets text back, never touching the mic, audio,
+  an API key, or the network. A confirm screen ("Add this item?") precedes adding.
+  No Android permissions; just approve speech-to-text in Plugin access.
 - **Bulk paste import** — paste a multi-line list on the phone and "Add all"
   turns each non-blank line into an item.
 
 ## Capabilities
 
-`surfaces` (HUD) and `microphone` (glasses mic for voice dictation). The
-microphone is approved per-plugin in Rokid Nexus → Plugin access; the phone also
-asks for the Android RECORD_AUDIO runtime permission (required by
-SpeechRecognizer even though the audio arrives over the hub). Voice needs
-Android 13+.
+`surfaces` (HUD) and `stt` (the hub's speech-to-text for voice dictation), both
+approved per-plugin in Rokid Nexus → Plugin access. No `microphone`, no Android
+runtime permissions, no API key — the hub owns the mic, audio and transcription.
+Requires SDK `sdk-v0.3.0` and hub 1.0.42+.
 
 ## R08 input mapping
 

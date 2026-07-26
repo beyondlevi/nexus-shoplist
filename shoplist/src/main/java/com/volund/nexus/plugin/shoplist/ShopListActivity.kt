@@ -17,10 +17,10 @@ import com.anezium.rokidbus.client.ui.NexusUi
 
 /**
  * Phone-side manager for the shopping list. Headless plugins never draw on the
- * glasses, so all editing (add / remove / clear checked) and voice setup (OpenAI
- * key, language, model) live here, built only from the NexusUi/BusTheme kit. The
- * list is rendered on the HUD by [ShopListPluginService]. Ends with the
- * mandatory uninstall card.
+ * glasses, so all editing (add / remove / clear checked) lives here, built only
+ * from the NexusUi/BusTheme kit. Voice dictation needs no setup here — the hub
+ * owns speech-to-text. The list is rendered on the HUD by [ShopListPluginService].
+ * Ends with the mandatory uninstall card.
  */
 class ShopListActivity : Activity() {
     private val store by lazy { ShopListStore(this) }
@@ -175,65 +175,19 @@ class ShopListActivity : Activity() {
     }
 
     /**
-     * Voice dictation config. The glasses mic reaches the plugin over the hub
-     * (Nexus `microphone` capability, approved in Plugin access — no Android
-     * permission). Transcription is OpenAI's buffered `/v1/audio/transcriptions`,
-     * so it needs an API key, and a model/language.
+     * Voice dictation info. Nothing to configure: the hub owns speech-to-text
+     * (`stt` capability) — no API key, no engine choice. The only setup is
+     * approving speech-to-text for this plugin in Rokid Nexus → Plugin access.
      */
     private fun sttSection(): LinearLayout {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         column.addView(
             NexusUi.cardBody(
                 this,
-                "Say items from the glasses: focus \"Add item by voice\" and tap the ring. " +
-                    "Approve the microphone for this plugin in Rokid Nexus → Plugin access. " +
-                    "Transcription uses OpenAI, so set your API key below.",
+                "Say items from the glasses: focus \"Add item by voice\", tap the ring, speak, " +
+                    "then confirm. Transcription runs on the hub — no account or API key. Just approve " +
+                    "speech-to-text for this plugin in Rokid Nexus → Plugin access.",
             ),
-            NexusUi.block(),
-        )
-        column.addView(BusTheme.gap(this, 10))
-
-        val enabled = store.isSttEnabled()
-        column.addView(
-            NexusUi.pillButton(this, if (enabled) "Voice: ON" else "Voice: OFF").apply {
-                setOnClickListener {
-                    store.setSttEnabled(!enabled)
-                    deferRebuild()
-                }
-            },
-            NexusUi.block(),
-        )
-        column.addView(BusTheme.gap(this, 10))
-
-        val keyField = NexusUi.field(this, "OpenAI API key (sk-…)").apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setText(store.openAiKey())
-        }
-        column.addView(keyField, NexusUi.block())
-        column.addView(BusTheme.gap(this, 8))
-
-        val langField = NexusUi.field(this, "Language e.g. pt, en (blank = auto)").apply {
-            setText(store.sttLanguage())
-        }
-        column.addView(langField, NexusUi.block())
-        column.addView(BusTheme.gap(this, 8))
-
-        val modelField = NexusUi.field(this, "Model (${SpeechToText.MODELS.values.joinToString(" / ")})").apply {
-            setText(store.sttModel())
-        }
-        column.addView(modelField, NexusUi.block())
-        column.addView(BusTheme.gap(this, 10))
-
-        column.addView(
-            NexusUi.pillButton(this, "Save voice settings").apply {
-                setOnClickListener {
-                    store.setOpenAiKey(keyField.text.toString())
-                    store.setSttLanguage(langField.text.toString())
-                    store.setSttModel(modelField.text.toString())
-                    Toast.makeText(this@ShopListActivity, "Voice settings saved", Toast.LENGTH_SHORT).show()
-                    deferRebuild()
-                }
-            },
             NexusUi.block(),
         )
         return column

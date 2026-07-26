@@ -1,9 +1,6 @@
 package com.volund.nexus.plugin.shoplist
 
 import android.content.Context
-import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -14,25 +11,11 @@ import java.util.UUID
  *
  * Backed by SharedPreferences holding a single JSON array. Limits are enforced
  * here so the HUD surface can never be handed a list that violates the card
- * contract (row count / line length).
+ * contract (row count / line length). Voice dictation needs no config here — the
+ * hub owns speech-to-text (no key, no engine choice).
  */
 class ShopListStore(context: Context) {
-    private val appContext = context.applicationContext
-    private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-
-    /** Encrypted store for the OpenAI key + voice config; falls back to plain prefs if crypto init fails. */
-    private val secure: SharedPreferences by lazy {
-        runCatching {
-            val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-            EncryptedSharedPreferences.create(
-                SECURE_PREFS,
-                masterKey,
-                appContext,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
-        }.getOrElse { appContext.getSharedPreferences("${SECURE_PREFS}_plain", Context.MODE_PRIVATE) }
-    }
+    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun load(): List<ShopItem> {
         val raw = prefs.getString(KEY_ITEMS, null) ?: return emptyList()
@@ -100,33 +83,9 @@ class ShopListStore(context: Context) {
         save(load().filterNot { it.done })
     }
 
-    /* ---------------- voice dictation (OpenAI STT) ---------------- */
-
-    fun openAiKey(): String = secure.getString(KEY_OPENAI, "").orEmpty()
-    fun setOpenAiKey(key: String) = secure.edit().putString(KEY_OPENAI, key.trim()).apply()
-
-    fun isSttEnabled(): Boolean = secure.getBoolean(KEY_STT_ENABLED, false)
-    fun setSttEnabled(enabled: Boolean) = secure.edit().putBoolean(KEY_STT_ENABLED, enabled).apply()
-
-    /** Forced transcription language (ISO code); blank = auto-detect. */
-    fun sttLanguage(): String = secure.getString(KEY_STT_LANG, "").orEmpty()
-    fun setSttLanguage(code: String) = secure.edit().putString(KEY_STT_LANG, code.trim()).apply()
-
-    fun sttModel(): String = secure.getString(KEY_STT_MODEL, SpeechToText.DEFAULT_MODEL).orEmpty()
-    fun setSttModel(model: String) =
-        secure.edit().putString(KEY_STT_MODEL, model.trim().ifBlank { SpeechToText.DEFAULT_MODEL }).apply()
-
-    /** Voice is usable only when enabled AND a key is set. */
-    fun voiceReady(): Boolean = isSttEnabled() && openAiKey().isNotBlank()
-
     private companion object {
         const val PREFS = "shoplist"
-        const val SECURE_PREFS = "shoplist_secure"
         const val KEY_ITEMS = "items"
-        const val KEY_OPENAI = "openai.key"
-        const val KEY_STT_ENABLED = "stt.enabled"
-        const val KEY_STT_LANG = "stt.language"
-        const val KEY_STT_MODEL = "stt.model"
         // Below the 64-row card ceiling; the state machine windows anything larger.
         const val MAX_ITEMS = 60
         // Leaves ample room under the 240-char surface line limit after the cursor/box prefix.

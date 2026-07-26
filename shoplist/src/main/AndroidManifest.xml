@@ -4,12 +4,10 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <!-- Voice dictation: the glasses PCM arrives over the Nexus hub (microphone
-         capability + the /audio receive prefix) — no Android RECORD_AUDIO needed.
-         INTERNET is for the phone-side OpenAI transcription call. -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Deliberately no POST_NOTIFICATIONS: plugin foreground services must stay
-         invisible; the Rokid Nexus hub notification is the single user-facing one. -->
+    <!-- Voice dictation uses the hub's speech-to-text (`stt` capability): the plugin
+         asks the hub to listen and gets text back — it never touches the mic, audio,
+         API keys, or the network. No RECORD_AUDIO, no INTERNET, no `microphone`.
+         Deliberately no POST_NOTIFICATIONS: the hub owns the one user-facing notice. -->
 
     <queries>
         <intent>
@@ -60,10 +58,10 @@
                 android:value="3" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.CAPABILITIES"
-                android:value="surfaces,microphone" />
+                android:value="surfaces,stt" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.RECEIVE_PREFIXES"
-                android:value="/plugin/shoplist,/system/plugin,/audio" />
+                android:value="/plugin/shoplist,/system/plugin,/stt" />
             <meta-data
                 android:name="com.anezium.rokidbus.plugin.SETTINGS_ACTIVITY"
                 android:value=".ShopListActivity" />

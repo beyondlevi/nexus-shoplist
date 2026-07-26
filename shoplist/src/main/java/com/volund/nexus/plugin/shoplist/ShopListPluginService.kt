@@ -3,26 +3,26 @@ package com.volund.nexus.plugin.shoplist
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
-import com.anezium.rokidbus.client.plugin.NexusAudioCallbacks
-import com.anezium.rokidbus.client.plugin.NexusAudioFormat
-import com.anezium.rokidbus.client.plugin.NexusAudioSession
-import com.anezium.rokidbus.client.plugin.NexusAudioStopReason
 import com.anezium.rokidbus.client.plugin.NexusCard
 import com.anezium.rokidbus.client.plugin.NexusPluginService
 import com.anezium.rokidbus.client.plugin.NexusSdkResult
+import com.anezium.rokidbus.client.plugin.NexusSpeechCallbacks
+import com.anezium.rokidbus.client.plugin.NexusSpeechError
+import com.anezium.rokidbus.client.plugin.NexusSpeechSession
+import com.anezium.rokidbus.client.plugin.NexusSpeechState
+import com.anezium.rokidbus.client.plugin.NexusSpeechStopReason
 import com.anezium.rokidbus.client.plugin.NexusSurfaceSession
 import com.anezium.rokidbus.shared.plugin.NexusInputEvent
-import java.io.ByteArrayOutputStream
 
 /**
  * Headless adapter between the Nexus bus and the pure [ShopListState].
  *
  * The card is walked with the R08 ring: NEXT/PREV move the cursor over
  * [Add by voice · items], SELECT starts voice dictation (row 0) or checks the
- * focused item off, BACK closes. Voice buffers the glasses mic PCM
- * (`nexusAudioSession`, delivered because the manifest declares the `microphone`
- * capability AND the `/audio` receive prefix) and transcribes it with OpenAI
- * ([SpeechToText]) — the buffered path proven in rokid-inbox-nexus.
+ * focused item off, BACK closes. Voice uses the hub's speech-to-text
+ * ([NexusSpeechSession], `stt` capability): the plugin asks the hub to listen and
+ * gets text back — no mic, audio, API key, or network here. Partial results
+ * stream while the user speaks; the final goes to an "Add this item?" confirm.
  */
 class ShopListPluginService : NexusPluginService() {
     private val state = ShopListState()
@@ -30,17 +30,19 @@ class ShopListPluginService : NexusPluginService() {
     private var surface: NexusSurfaceSession? = null
     private val main = Handler(Looper.getMainLooper())
 
-    private enum class Mode { NORMAL, LISTENING, TRANSCRIBING, CONFIRM, NOTICE }
+    private enum class Mode { NORMAL, LISTENING, CONFIRM, NOTICE }
     private var mode = Mode.NORMAL
     private var notice = ""
     private var pendingText = ""
+    private var partial = ""
 
-    private var audio: NexusAudioSession? = null
-    private val micLock = Any()
-    private val micBuffer = ByteArrayOutputStream()
-    private var micSampleRate = 16_000
-    private var listening = false
-    private var cancelDictation = false
+    private var speech: NexusSpeechSession? = null
+    // Rough edges the maintainer flagged: stop() is a no-op while PENDING, and
+    // isActive can't tell pending from idle — so track intent ourselves.
+    private var stopRequested = false
+    private var cancelled = false
+    private var gotFinal = false
+    private var processing = false
 
     override fun onNexusOpen() {
         store = ShopListStore(this)
@@ -51,8 +53,8 @@ class ShopListPluginService : NexusPluginService() {
     }
 
     override fun onNexusClose() {
-        audio?.stop()
-        audio = null
+        // The SDK releases the speech session before this runs; just drop refs.
+        speech = null
         surface?.hide()
         surface = null
         store = null
@@ -62,7 +64,6 @@ class ShopListPluginService : NexusPluginService() {
         if (event.action != KeyEvent.ACTION_DOWN) return
         when (mode) {
             Mode.LISTENING -> onListeningInput(event.keyCode)
-            Mode.TRANSCRIBING -> Unit // busy; ignore input until the result lands
             Mode.CONFIRM -> onConfirmInput(event.keyCode)
             Mode.NOTICE -> onNoticeInput(event.keyCode)
             Mode.NORMAL -> onNormalInput(event.keyCode)
@@ -87,31 +88,15 @@ class ShopListPluginService : NexusPluginService() {
     }
 
     private fun onListeningInput(keyCode: Int) {
+        // Utterance mode: the hub auto-finalizes when the user stops speaking, then
+        // sends onSpeechFinal. stop() means CANCEL (it discards a buffered final),
+        // so SELECT must NOT stop — only BACK cancels.
         when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                // Stop speaking -> release the lease, which triggers transcription.
-                mode = Mode.TRANSCRIBING
-                render(show = false)
-                audio?.stop()
-            }
-            KeyEvent.KEYCODE_BACK -> {
-                cancelDictation = true
-                audio?.stop()
-                mode = Mode.NORMAL
-                render(show = false)
-            }
+            KeyEvent.KEYCODE_BACK -> cancelVoice()
             else -> Unit
         }
     }
 
-    private fun onNoticeInput(keyCode: Int) {
-        when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> startVoice() // retry
-            else -> { mode = Mode.NORMAL; render(show = false) }
-        }
-    }
-
-    /** Confirm screen after transcription: SELECT adds the item, BACK discards it. */
     private fun onConfirmInput(keyCode: Int) {
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
@@ -134,86 +119,103 @@ class ShopListPluginService : NexusPluginService() {
         }
     }
 
-    // --- Voice capture (mic -> buffer -> OpenAI STT) ---------------------------
-
-    private fun startVoice() {
-        val store = this.store ?: return
-        if (!store.voiceReady()) {
-            showNotice("Enable voice + set the OpenAI key in plugin settings")
-            return
-        }
-        synchronized(micLock) { micBuffer.reset(); listening = false }
-        cancelDictation = false
-        val session = nexusAudioSession(audioCallbacks) ?: run { showNotice("Voice unavailable"); return }
-        audio = session
-        when (session.start()) {
-            NexusSdkResult.SENT -> { mode = Mode.LISTENING; render(show = false) }
-            NexusSdkResult.CAPABILITY_NOT_GRANTED ->
-                abortVoice("Approve the microphone in Plugin access")
-            NexusSdkResult.NOT_REGISTERED -> abortVoice("Hub not connected yet — try again")
-            else -> abortVoice("Glasses mic unavailable")
+    private fun onNoticeInput(keyCode: Int) {
+        when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> startVoice() // retry
+            else -> { mode = Mode.NORMAL; render(show = false) }
         }
     }
 
-    private val audioCallbacks = object : NexusAudioCallbacks {
-        override fun onAudioStarted(format: NexusAudioFormat) {
+    // --- Voice dictation (hub STT -> text) -------------------------------------
+
+    private fun startVoice() {
+        partial = ""
+        pendingText = ""
+        stopRequested = false
+        cancelled = false
+        gotFinal = false
+        processing = false
+        val session = nexusSpeechSession(speechCallbacks) ?: run { showNotice("Voice unavailable"); return }
+        speech = session
+        when (session.start(null)) {
+            NexusSdkResult.SENT -> { mode = Mode.LISTENING; render(show = false) }
+            NexusSdkResult.CAPABILITY_NOT_GRANTED -> abortVoice("Approve speech-to-text in Plugin access")
+            NexusSdkResult.NOT_REGISTERED -> abortVoice("Hub not connected yet — try again")
+            NexusSdkResult.CAPABILITY_NOT_AVAILABLE -> abortVoice("Speech-to-text needs a newer hub")
+            else -> abortVoice("Voice unavailable")
+        }
+    }
+
+    /** SELECT while listening does nothing; the hub finalizes on its own (see onListeningInput). */
+
+    /** BACK while listening: discard and return to the list. */
+    private fun cancelVoice() {
+        cancelled = true
+        val s = speech
+        if (s != null) { if (s.isActive) s.stop() else stopRequested = true }
+        mode = Mode.NORMAL
+        render(show = false)
+    }
+
+    private val speechCallbacks = object : NexusSpeechCallbacks {
+        override fun onSpeechStarted(realtime: Boolean) {
             main.post {
-                synchronized(micLock) {
-                    micSampleRate = if (format.sampleRate > 0) format.sampleRate else 16_000
-                    micBuffer.reset()
-                    listening = true
-                }
+                if (cancelled || stopRequested) { stopRequested = false; speech?.stop() }
+            }
+        }
+
+        override fun onSpeechState(state: NexusSpeechState) {
+            main.post {
+                if (cancelled) return@post
+                processing = state == NexusSpeechState.PROCESSING
                 if (mode == Mode.LISTENING) render(show = false)
             }
         }
 
-        override fun onAudioFrame(pcm: ByteArray, seq: Long, elapsedRealtimeMs: Long) {
-            synchronized(micLock) { if (listening) micBuffer.write(pcm) }
-        }
-
-        override fun onAudioStopped(reason: NexusAudioStopReason) {
+        override fun onSpeechPartial(text: String) {
             main.post {
-                val bytes = synchronized(micLock) {
-                    listening = false
-                    micBuffer.toByteArray().also { micBuffer.reset() }
-                }
-                audio = null
-                if (cancelDictation) { cancelDictation = false; mode = Mode.NORMAL; render(show = false); return@post }
-                if (reason != NexusAudioStopReason.RELEASED) {
-                    showNotice(micErrorText(reason)); return@post
-                }
-                transcribe(bytes)
+                if (cancelled) return@post
+                partial = text
+                mode = Mode.LISTENING
+                render(show = false)
             }
         }
-    }
 
-    private fun transcribe(bytes: ByteArray) {
-        val store = this.store ?: return
-        mode = Mode.TRANSCRIBING
-        render(show = false)
-        val stt = SpeechToText(store.openAiKey(), store.sttModel(), store.sttLanguage())
-        val rate = synchronized(micLock) { micSampleRate }
-        Thread {
-            val result = runCatching { stt.transcribe(bytes, rate) }
+        override fun onSpeechFinal(text: String) {
             main.post {
-                result.onSuccess { text ->
-                    if (text.isBlank()) {
-                        showNotice("Didn't catch that — tap to retry")
-                    } else {
-                        pendingText = text.trim().take(120) // matches the store's label cap
-                        mode = Mode.CONFIRM
-                        render(show = false)
-                    }
-                }.onFailure {
-                    showNotice("Transcription failed: ${it.message?.take(140).orEmpty()}")
+                if (cancelled) return@post
+                val clean = text.trim().take(120)
+                if (clean.isNotBlank()) {
+                    gotFinal = true
+                    pendingText = clean
+                    mode = Mode.CONFIRM
+                    render(show = false)
                 }
             }
-        }.start()
+        }
+
+        override fun onSpeechStopped(reason: NexusSpeechStopReason, error: NexusSpeechError?) {
+            main.post {
+                speech = null
+                if (cancelled) { cancelled = false; return@post }
+                if (gotFinal) return@post // final already moved us to CONFIRM
+                // Early stop with no final: fall back to the last partial if any.
+                val salvage = partial.trim().take(120)
+                if (salvage.isNotBlank() && (reason == NexusSpeechStopReason.COMPLETED ||
+                        reason == NexusSpeechStopReason.CANCELLED)
+                ) {
+                    pendingText = salvage
+                    mode = Mode.CONFIRM
+                    render(show = false)
+                } else {
+                    showNotice(stopText(reason, error))
+                }
+            }
+        }
     }
 
     private fun abortVoice(message: String) {
-        audio?.stop()
-        audio = null
+        speech = null
         showNotice(message)
     }
 
@@ -223,12 +225,18 @@ class ShopListPluginService : NexusPluginService() {
         render(show = false)
     }
 
-    private fun micErrorText(reason: NexusAudioStopReason): String = when (reason) {
-        NexusAudioStopReason.REVOKED -> "Mic lost (link dropped or another app took it)"
-        NexusAudioStopReason.DENIED_BUSY -> "Mic in use by another plugin"
-        NexusAudioStopReason.DENIED_NO_LINK -> "No connection to the glasses"
-        NexusAudioStopReason.DENIED_NOT_GRANTED -> "Approve the microphone in Plugin access"
-        else -> "Could not capture audio"
+    private fun stopText(reason: NexusSpeechStopReason, error: NexusSpeechError?): String = when (reason) {
+        NexusSpeechStopReason.NO_SPEECH -> "Didn't catch that — tap to retry"
+        NexusSpeechStopReason.DENIED_BUSY -> "Voice is busy — try again"
+        NexusSpeechStopReason.DENIED_NO_LINK, NexusSpeechStopReason.LINK_LOST -> "No connection to the glasses"
+        NexusSpeechStopReason.DENIED_NOT_READY -> "Hub not ready — try again"
+        NexusSpeechStopReason.REVOKED -> "Speech-to-text was revoked"
+        else -> when (error?.kind?.uppercase()) {
+            "AUTH" -> "Speech-to-text key rejected — check Nexus speech settings"
+            "NETWORK" -> "Speech network error — try again"
+            "CONFIG", "NO_ENGINE" -> "Set up speech-to-text in Nexus settings"
+            else -> "Couldn't transcribe — tap to retry"
+        }
     }
 
     // --- Rendering -------------------------------------------------------------
@@ -236,17 +244,14 @@ class ShopListPluginService : NexusPluginService() {
     private fun render(show: Boolean) {
         val card = when (mode) {
             Mode.LISTENING -> NexusCard(
-                title = "Listening…",
-                lines = listOf("  Speak the item, then tap to add."),
-                footer = "tap to add . back to cancel",
-                contentKey = "voice-listening",
-                handlesBack = true,
-            )
-            Mode.TRANSCRIBING -> NexusCard(
-                title = "Transcribing…",
-                lines = listOf("  One moment."),
-                footer = "please wait",
-                contentKey = "voice-transcribing",
+                title = if (processing) "Transcribing…" else "Listening…",
+                lines = listOf(
+                    partial.ifBlank { if (processing) "  One moment…" else "  Speak the item, then pause." },
+                ),
+                footer = "back to cancel",
+                contentKey = "voice-listening-" + Integer.toHexString(
+                    (if (processing) "p:" else "l:").plus(partial).hashCode(),
+                ),
                 handlesBack = true,
             )
             Mode.CONFIRM -> NexusCard(
